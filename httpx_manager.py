@@ -43,10 +43,12 @@ class HTTPXMANAGER:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type(
-            lambda e: isinstance(e, (httpx.TimeoutException, httpx.NetworkError, CircuitBreakerError)) or
-                      (isinstance(e, httpx.HTTPStatusError) and (
-                              e.response.status_code >= 500 or e.response.status_code == 429))),
+        retry=retry_if_exception_type((
+                httpx.TimeoutException,
+                httpx.NetworkError,
+                CircuitBreakerError,
+                httpx.HTTPStatusError  # Add this as a type, not a lambda
+        )),
         reraise=True
     )
     async def make_request(self, url: str, method: str = "GET", body: Optional[dict] = None,
@@ -63,11 +65,18 @@ class HTTPXMANAGER:
             self.logger.warning(f"Circuit breaker open: {url} - {e}")
             return {"error": {"code": "CIRCUIT_BREAKER_OPEN", "message": "Service temporarily unavailable"}}
         except Exception as e:
+            # Additional filtering for HTTPStatusError
+            if isinstance(e, httpx.HTTPStatusError):
+                # Only retry on server errors (5xx) and rate limiting (429)
+                if e.response.status_code >= 500 or e.response.status_code == 429:
+                    raise  # This will trigger retry
+                else:
+                    return {"error": {"code": f"HTTP_{e.response.status_code}", "message": str(e)}}
             # This will be caught by the retry decorator for retry-able exceptions
             raise
 
     async def _execute_request(self, url: str, method: str, body: Optional[dict],
-                               headers: Optional[dict], timeout: Optional[float]) -> Dict[str, Any]:
+                               headers: Optional[dict], timeout: Optional[float],follow_redirects:bool=True) -> Dict[str, Any]:
         """Actual HTTP request execution."""
         self.logger.debug(f"Making {method} request to {url}")
         self.logger.debug(f"Request body: {body}")
@@ -76,7 +85,7 @@ class HTTPXMANAGER:
         headers = headers or {"Content-Type": "application/json"}
 
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout,follow_redirects=follow_redirects) as client:
                 if method.upper() == "GET":
                     self.logger.debug("Sending GET request")
                     resp = await client.get(url, headers=headers)
@@ -123,10 +132,6 @@ class HTTPXMANAGER:
             self.logger.error(f"Unexpected error in _execute_request: {url}")
             self.logger.exception(e)
             return {"error": {"code": "UNEXPECTED_ERROR", "message": f"Unexpected error: {e}"}}
-
-
-
-
 
 if __name__ == '__main__':
     # Usage example
