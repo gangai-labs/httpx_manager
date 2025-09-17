@@ -84,6 +84,8 @@ HTTPXMANAGER includes built-in error handling for common HTTP errors and network
 Contributing
 
 Contributions are welcome! Please fork the repository and submit a pull request with your changes.
+
+change your logger path as i keep all such a these functions in src/helpers same as my logger.py
 License
 
 This project is licensed under the MIT License.
